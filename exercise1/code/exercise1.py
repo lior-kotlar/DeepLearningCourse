@@ -4,9 +4,13 @@ import sys
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import torch.nn.functional as fun
 from prepreprocess import *
 from torch.utils.data import Dataset, DataLoader
+from sklearn.model_selection import train_test_split
 
+
+amino_acids = "ACDEFGHIKLMNPQRSTVWY"
 THRESHOLD = 0.3
 LR = 0.01
 CRITERIA = [nn.CrossEntropyLoss]
@@ -14,32 +18,67 @@ N_EPOCS = 30
 
 
 class peptide_dataset(Dataset):
+
     def __init__(self, allels_antigens):
-        self.peptides = []
+        self.amino_dictionary = None
+        self.antigens = []
         self.allel_labels = []
+        self.amino_dictionary = self.make_amino_dictionary()
+        self.num_classes = len(allels_antigens)
 
         for class_idx, antigen_list in enumerate(allels_antigens):
-            self.words.extend(antigen_list)
-            self.labels.extend([class_idx] * len(antigen_list))
-
-        
+            self.antigens.extend(antigen_list)
+            self.allel_labels.extend([class_idx] * len(antigen_list))
 
 
-def load_train_data(data_directory): # assumes there are no shared words between any files
-    if not os.path.isdir(data_directory):
-        print("Data directory does not exist")
-        exit(-1)
-    file_names = [f for f in os.listdir(data_directory) if f.endswith(".txt")]
-    file_names_no_extension = [os.path.splitext(filename)[0] for filename in file_names]
-    allels = {}
-    for no_ext, file_name in zip(file_names_no_extension, file_names):
-        file_full_path = os.path.join(data_directory, file_name)
-        with open(file_full_path, "r") as f:
-            allel_antigens = [line.strip() for line in f if line.strip()]
-            print(len(allel_antigens))
-            allels[no_ext] = allel_antigens
+    def __len__(self):
+        return len(self.antigens)
 
 
+    def __getitem__(self, idx):
+        antigen_string = self.antigens[idx]
+        return self.encode_antigen(antigen_string), self.allel_labels[idx]
+
+
+    def encode_antigen(self, antigen):
+        encoding_vector = []
+        for char in antigen:
+            encoding_vector.append(self.amino_dictionary[char])
+        as_tensor = torch.tensor(encoding_vector, dtype=torch.long)
+        output = fun.one_hot(as_tensor, num_classes=len(amino_acids)).float()
+        return output
+
+
+    def make_amino_dictionary(self):
+        amino_dictionary = {}
+        for i, one_acid in enumerate(amino_acids):
+            amino_dictionary[one_acid] = i
+        return amino_dictionary
+
+
+class trainer:
+    def __init__(self, data_directory):
+        self.peptide_dataset, self.idx_to_class_name = self.load_train_data(data_directory)
+
+
+    def load_train_data(self, data_directory):# assumes there are no shared words between any files
+        print(f'data_directory {data_directory}')
+        if not os.path.isdir(data_directory):
+            print("Data directory does not exist")
+            exit(-1)
+        file_names = [f for f in os.listdir(data_directory) if f.endswith(".txt")]
+        file_names_no_extension = [os.path.splitext(filename)[0] for filename in file_names]
+        antigen_groups_by_allel = []
+        idx_to_class_name = {}
+        for class_idx, (no_ext, file_name) in enumerate(zip(file_names_no_extension, file_names)):
+            idx_to_class_name[class_idx] = no_ext
+            file_full_path = os.path.join(data_directory, file_name)
+            with open(file_full_path, "r") as f:
+                allel_antigens = [line.strip() for line in f if line.strip()]
+                print(len(allel_antigens))
+                antigen_groups_by_allel.append(allel_antigens)
+        dataset = peptide_dataset(antigen_groups_by_allel)
+        return dataset, idx_to_class_name
 
 
 
@@ -120,20 +159,20 @@ def process_data(alleles_dict):
     return X, y
 
 
-def train_model():
-    # Load data
-    alleles_dict = load_train_data("data_directory")
-
-    # Process data
-    X, y = process_data(alleles_dict)
-
-    # Initialize model
-    model = MLP_B()
-
-    # Train model
-    model = run(model, nn.CrossEntropyLoss, X, y, N_EPOCS)
-
-    return model
+# def train_model():
+#     # Load data
+#     alleles_dict = load_train_data("data_directory")
+#
+#     # Process data
+#     X, y = process_data(alleles_dict)
+#
+#     # Initialize model
+#     model = MLP_B()
+#
+#     # Train model
+#     model = run(model, nn.CrossEntropyLoss, X, y, N_EPOCS)
+#
+#     return model
 
 def test_model(model, test_antigens):
     """
@@ -170,7 +209,7 @@ def main():
     # print("Results:")
     # for antigen, result in zip(test, results):
     #     print(f"{antigen}: {result}")
-    load_train_data(sys.argv[1])
+    peptide_trainer = trainer(sys.argv[1])
 
 
 if __name__ == '__main__':
