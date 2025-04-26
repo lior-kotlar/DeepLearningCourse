@@ -55,6 +55,23 @@ class MLP_B(nn.Module):
         x = torch.relu(self.fc2(x))
         x = self.fc3(x)
         return x
+    
+class MLP_C(nn.Module):
+    def __init__(self):
+        super(MLP_C, self).__init__()
+        self.fc1 = nn.Linear(180, 256)
+        self.fc2 = nn.Linear(256, 512)
+        self.fc3 = nn.Linear(512, 256)
+        self.fc4 = nn.Linear(256, 128)
+        self.fc5 = nn.Linear(128, 6)
+
+    def forward(self, x):
+        x = torch.relu(self.fc1(x))
+        x = torch.relu(self.fc2(x))
+        x = torch.relu(self.fc3(x))
+        x = torch.relu(self.fc4(x))
+        x = self.fc5(x)
+        return x
 
 def decide(network_output):
     # network_output: (batch_size, num_alleles)
@@ -340,7 +357,8 @@ def main():
     #train_loader, val_loader, test_loader = get_train_val_test(alleles_dict, negative_antigens)
 
     # Initialize and train model
-    model = MLP_B()
+    #model = MLP_B()
+    model = MLP_C()
     
     model = run(model, train_loader, N_EPOCS)
     #model = run_with_validation(model, train_loader, val_loader, N_EPOCS)
