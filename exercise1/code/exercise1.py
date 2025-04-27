@@ -21,14 +21,25 @@ class peptide_dataset(Dataset):
 
     def __init__(self, allels_antigens):
         self.amino_dictionary = None
-        self.antigens = []
-        self.allel_labels = []
+        self.antigens_as_strings = []
+        self.encoded_antigens = []
+        self.encoded_allel_labels = []
         self.amino_dictionary = self.make_amino_dictionary()
         self.num_classes = len(allels_antigens)
 
         for class_idx, antigen_list in enumerate(allels_antigens):
-            self.antigens.extend(antigen_list)
-            self.allel_labels.extend([class_idx] * len(antigen_list))
+            self.antigens_as_strings.extend(antigen_list)
+            encoded_list = torch.Tensor([])
+            for antigen in antigen_list:
+                encoded_list = torch.stack((encoded_list, self.encode_antigen(antigen)))
+            print(encoded_list)
+            encoded_antigen_list = [self.encode_antigen(antigen) for antigen in antigen_list]
+            encoded_antigen_list_tensor = torch.Tensor(encoded_antigen_list)
+            self.encoded_antigens = torch.stack(self.encoded_antigens, encoded_antigen_list_tensor)
+            encoded_labels_list = torch.tensor([class_idx] * len(antigen_list))
+            self.encoded_allel_labels.extend(encoded_labels_list)
+
+        self.peptide_length = len(self.encoded_antigens[0])
 
 
     def __len__(self):
@@ -36,8 +47,11 @@ class peptide_dataset(Dataset):
 
 
     def __getitem__(self, idx):
-        antigen_string = self.antigens[idx]
-        return self.encode_antigen(antigen_string), self.allel_labels[idx]
+        return self.encoded_antigens[idx], self.encoded_allel_labels[idx]
+
+
+    def getitem_as_string(self, idx):
+        return self.antigens_as_strings[idx], self.encoded_allel_labels[idx]
 
 
     def encode_antigen(self, antigen):
@@ -81,20 +95,41 @@ class trainer:
         return dataset, idx_to_class_name
 
 
+    def get_train_loader(self):
+        x_train, x_test, y_train, y_test = train_test_split(
+            range(len(self.peptide_dataset)),
+            test_size=0.1,
+            stratify=self.peptide_dataset.encoded_allel_labels,
+            random_state=42
+        )
+
+        print(x_train, x_test, y_train, y_test)
+
+
+    def train(self):
+        pass
+
+
 
 
 class MLP_B(nn.Module):
-    def __init__(self):
-        super(MLP_B, self).__init__()
-        self.fc1 = nn.Linear(180, 180)
-        self.fc2 = nn.Linear(180, 180)
-        self.fc3 = nn.Linear(180, 6)
+    def __init__(self, peptide_length, num_classes):
+        super().__init__()
+        input_dim = peptide_length * len(amino_acids)
+        self.all_layers = nn.Sequential(
+            nn.Linear(input_dim, input_dim),
+            nn.Linear(input_dim, input_dim),
+            nn.Linear(input_dim, num_classes),
+        )
+
 
     def forward(self, x):
-        x = torch.relu(self.fc1(x))
-        x = torch.relu(self.fc2(x))
-        x = self.fc3(x)
-        return x
+        # x = torch.relu(self.fc1(x))
+        # x = torch.relu(self.fc2(x))
+        # x = self.fc3(x)
+        # return x
+        logits = self.all_layers(x)
+        return logits
 
 def decide(network_output):
     probabilities = torch.softmax(network_output, dim=1)
@@ -123,42 +158,6 @@ def run(mod, crit, input, labels, num_epochs):
     return model
 
 
-def preprocess_antigen(antigen):
-    """
-    Convert a 9-letter protein sequence to a 180-dimensional feature vector
-    using one-hot encoding for each amino acid.
-    """
-    amino_acids = "ACDEFGHIKLMNPQRSTVWY"
-    feature_vector = np.zeros(180)
-    for i, aa in enumerate(antigen):
-        aa_idx = amino_acids.find(aa)
-        if aa_idx != -1:
-            feature_vector[i * 20 + aa_idx] = 1
-    return feature_vector
-
-
-def process_data(alleles_dict):
-    """
-    Process the loaded data to create training features and labels
-    """
-    all_antigens = []
-    all_labels = []
-
-    # Assuming each key in alleles_dict corresponds to one of the 6 alleles
-    for idx, (allele_name, antigens) in enumerate(alleles_dict.items()):
-        for antigen in antigens:
-            # Convert antigen to feature vector - assumes preprocess_antigen is defined in prepreprocess.py
-            feature_vector = preprocess_antigen(antigen)
-            all_antigens.append(feature_vector)
-            all_labels.append(idx)  # Use the index as the label
-
-    # Convert to tensors
-    X = torch.tensor(all_antigens, dtype=torch.float32)
-    y = torch.tensor(all_labels, dtype=torch.long)
-
-    return X, y
-
-
 # def train_model():
 #     # Load data
 #     alleles_dict = load_train_data("data_directory")
@@ -174,27 +173,27 @@ def process_data(alleles_dict):
 #
 #     return model
 
-def test_model(model, test_antigens):
-    """
-    Test the model on new antigens
-    """
-    model.eval()
-    results = []
-
-    for antigen in test_antigens:
-        # Convert antigen to feature vector
-        feature_vector = preprocess_antigen(antigen)
-        input_tensor = torch.tensor([feature_vector], dtype=torch.float32)
-
-        # Forward pass
-        with torch.no_grad():
-            output = model(input_tensor)
-
-        # Make decision using your threshold-based approach
-        detection = decide(output)
-        results.append("Detect" if detection else "Not Detect")
-
-    return results
+# def test_model(model, test_antigens):
+#     """
+#     Test the model on new antigens
+#     """
+#     model.eval()
+#     results = []
+#
+#     for antigen in test_antigens:
+#         # Convert antigen to feature vector
+#         feature_vector = preprocess_antigen(antigen)
+#         input_tensor = torch.tensor([feature_vector], dtype=torch.float32)
+#
+#         # Forward pass
+#         with torch.no_grad():
+#             output = model(input_tensor)
+#
+#         # Make decision using your threshold-based approach
+#         detection = decide(output)
+#         results.append("Detect" if detection else "Not Detect")
+#
+#     return results
 
 
 def get_train_test():
@@ -209,7 +208,10 @@ def main():
     # print("Results:")
     # for antigen, result in zip(test, results):
     #     print(f"{antigen}: {result}")
+
     peptide_trainer = trainer(sys.argv[1])
+    peptide_trainer.get_train_loader()
+    peptide_length = peptide_trainer.peptide_dataset.peptide_length
 
 
 if __name__ == '__main__':
