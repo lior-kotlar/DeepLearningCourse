@@ -129,12 +129,24 @@ class MLP_classifier(nn.Module):
         super().__init__()
         self.ff = nn.Linear(input_size, NUM_DIGITS)
 
-
     def forward(self, x):
         return self.ff(x)
 
 class q2_encoder_classifier(nn.Module):
     def __init__(self, encoder_1_layer, encoder_2_layer, encoder_3_layer):
+        super().__init__()
+        self.encoder = Encoder(encoder_1_layer, encoder_2_layer, encoder_3_layer)
+        self.classifer = MLP_classifier(input_size=encoder_3_layer)
+
+    def forward(self, x):
+        encoded = self.encoder(x)
+        encoded = encoded.view(encoded.size(0), -1)
+        classified = self.classifer(encoded)
+        return classified
+
+
+class q3_encoder_classifier(nn.Module):
+    def __init__(self, encoder_1_layer, encoder_2_layer, encoder_3_layer, pretrained_encoder_path):
         super().__init__()
         self.encoder = Encoder(encoder_1_layer, encoder_2_layer, encoder_3_layer)
         self.classifer = MLP_classifier(input_size=encoder_3_layer)
@@ -215,7 +227,7 @@ def get_mnist_training_sets(batch_size):
     )
     return train_loader, test_loader
 
-def q1_encoder_decoder_training(plot_save_directory, model_type):
+def q1_encoder_decoder_training(plot_save_directory, model_type, save_encoder):
 
     data_loader, _ = get_mnist_training_sets(BATCH_SIZE)
     model = model_type.to(device)
@@ -240,15 +252,16 @@ def q1_encoder_decoder_training(plot_save_directory, model_type):
         outputs.append((epoch, img, reconstruction))
 
     plot_losses_and_reconstruction(outputs, losses, plot_save_directory, NUM_EPOCHS)
+    if save_encoder:
+        torch.save(model.encoder.state_dict(), "models/encoder_pretrained.pth")
 
-
-def q1():
-    small_ae_save_directory = './plots/small autoencoder'
-    large_ae_save_directory = './plots/large autoencoder'
-    q1_encoder_decoder_training(small_ae_save_directory, Conv_AE_small())
-    q1_encoder_decoder_training(large_ae_save_directory, Conv_AE_large(16, 32, 64))
-
-
+def q1(small = True, large = True, save_encoder = False):
+    if small:
+        small_ae_save_directory = './plots/small autoencoder'
+        q1_encoder_decoder_training(small_ae_save_directory, Conv_AE_small())
+    if large:
+        large_ae_save_directory = './plots/large autoencoder'
+        q1_encoder_decoder_training(large_ae_save_directory, Conv_AE_large(16, 32, 64), save_encoder)
 
 def plot_loss_and_accuracy(train_losses, test_losses,
                            train_accuracies, test_accuracies,
@@ -287,8 +300,11 @@ def plot_loss_and_accuracy(train_losses, test_losses,
     print(f"Plot saved to {plot_path}")
 
 
-def get_q2_training_tools():
-    model = q2_encoder_classifier(ENCODER_1_LAYER, ENCODER_2_LAYER, ENCODER_3_LAYER)
+def get_q2_training_tools(pretrained_model_path = None):
+    if pretrained_model_path is None:
+        model = q2_encoder_classifier(ENCODER_1_LAYER, ENCODER_2_LAYER, ENCODER_3_LAYER)
+    else:
+
     model.to(device)
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE, weight_decay=1e-5)
@@ -296,7 +312,7 @@ def get_q2_training_tools():
     train_loader, test_loader = get_mnist_training_sets(BATCH_SIZE)
     return model, criterion, optimizer, scheduler, train_loader, test_loader
 
-def q2_training(plot_save_directory):
+def q2_training(plot_save_directory, pretrained_encoder = False):
     model, criterion, optimizer, scheduler, train_loader, test_loader = get_q2_training_tools()
     train_losses, test_losses = [], []
     train_accuracies, test_accuracies = [], []
@@ -356,7 +372,6 @@ def q2_training(plot_save_directory):
                            train_accuracies, test_accuracies,
                            plot_save_directory,
                            learning_rate_updates_epochs)
-
 
 
 def q2():
