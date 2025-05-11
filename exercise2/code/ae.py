@@ -9,12 +9,11 @@ import os
 # size = ((input_size-kernel_size+2*padding)/stride) + 1
 NUM_DIGITS = 10
 BATCH_SIZE = 64
-NUM_EPOCHS = 20
+NUM_EPOCHS = 15
+LEARNING_RATE = 0.001
 ENCODER_1_LAYER = 16
 ENCODER_2_LAYER = 32
 ENCODER_3_LAYER = 64
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class Linear_AE(nn.Module):
@@ -184,7 +183,6 @@ def plot_losses_and_reconstruction(outputs, losses, plot_save_directory, num_epo
     plt.savefig(plot_path)
     print(f"Plot saved to {plot_path}")
 
-
 def get_mnist_training_sets(batch_size):
     transform = transforms.Compose([
         transforms.ToTensor(),
@@ -224,7 +222,6 @@ def q1_encoder_decoder_training(plot_save_directory, model_type):
     criterion = nn.L1Loss()
     optimizer = optim.Adam(model_type.parameters(), lr=1e-3, weight_decay=1e-5)
 
-
     outputs = []
     losses = []
     for epoch in range(NUM_EPOCHS):
@@ -252,14 +249,59 @@ def q1():
     q1_encoder_decoder_training(large_ae_save_directory, Conv_AE_large(16, 32, 64))
 
 
-def q2_training(plot_save_directory):
+
+def plot_loss_and_accuracy(train_losses, test_losses,
+                           train_accuracies, test_accuracies,
+                           plot_save_directory,
+                           learning_rate_updates_epochs = None):
+    epochs = range(1, NUM_EPOCHS + 1)
+    plt.figure(figsize=(12, 5))
+    plt.subplot(1, 2, 1)
+    plt.plot(epochs, train_losses, label='Train Loss', marker='o')
+    plt.plot(epochs, test_losses, label='Test Loss', marker='s')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.title('Loss over Epochs')
+    plt.legend()
+    plt.grid(True)
+
+    if learning_rate_updates_epochs:
+        for epoch_idx in learning_rate_updates_epochs:
+            plt.axvline(x=epoch_idx + 1, color='red', linestyle='--', alpha=0.6)
+            max_loss = max(train_losses + test_losses)
+            plt.text(epoch_idx + 1, max_loss, 'LR ↓', color='red', fontsize=8, ha='center', va='bottom')
+
+    # Accuracy Plot
+    plt.subplot(1, 2, 2)
+    plt.plot(epochs, train_accuracies, label='Train Accuracy', marker='o')
+    plt.plot(epochs, test_accuracies, label='Test Accuracy', marker='s')
+    plt.xlabel('Epoch')
+    plt.ylabel('Accuracy (%)')
+    plt.title('Accuracy over Epochs')
+    plt.legend()
+    plt.grid(True)
+
+    plt.tight_layout()
+    plot_path = os.path.join(plot_save_directory, "loss and accuracy.png")
+    plt.savefig(plot_path)
+    print(f"Plot saved to {plot_path}")
+
+
+def get_q2_training_tools():
     model = q2_encoder_classifier(ENCODER_1_LAYER, ENCODER_2_LAYER, ENCODER_3_LAYER)
     model.to(device)
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-5)
+    optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE, weight_decay=1e-5)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', patience=1, factor=0.1)
     train_loader, test_loader = get_mnist_training_sets(BATCH_SIZE)
+    return model, criterion, optimizer, scheduler, train_loader, test_loader
+
+def q2_training(plot_save_directory):
+    model, criterion, optimizer, scheduler, train_loader, test_loader = get_q2_training_tools()
     train_losses, test_losses = [], []
     train_accuracies, test_accuracies = [], []
+    learning_rate_updates_epochs = []
+    prev_lr = LEARNING_RATE
     for epoch in range(NUM_EPOCHS):
         model.train()
         running_loss = 0.0
@@ -300,35 +342,21 @@ def q2_training(plot_save_directory):
         test_losses.append(test_loss)
         test_accuracies.append(test_accuracy)
 
+        scheduler.step(test_loss)
+        current_lr = optimizer.param_groups[0]['lr']
+        if current_lr != prev_lr:
+            print(f"Learning rate reduced from {prev_lr:.8f} to {current_lr:.8f}")
+            learning_rate_updates_epochs.append(epoch)
+            prev_lr = current_lr
+
         print(f"Epoch {epoch + 1}/{NUM_EPOCHS} - Train Loss: {train_loss:.4f}, Acc: {train_accuracy:.2f}% | "
               f"Test Loss: {test_loss:.4f}, Acc: {test_accuracy:.2f}%")
 
+    plot_loss_and_accuracy(train_losses, test_losses,
+                           train_accuracies, test_accuracies,
+                           plot_save_directory,
+                           learning_rate_updates_epochs)
 
-    epochs = range(1, NUM_EPOCHS+1)
-    plt.figure(figsize=(12, 5))
-    plt.subplot(1, 2, 1)
-    plt.plot(epochs, train_losses, label='Train Loss', marker='o')
-    plt.plot(epochs, test_losses, label='Test Loss', marker='s')
-    plt.xlabel('Epoch')
-    plt.ylabel('Loss')
-    plt.title('Loss over Epochs')
-    plt.legend()
-    plt.grid(True)
-
-    # Accuracy Plot
-    plt.subplot(1, 2, 2)
-    plt.plot(epochs, train_accuracies, label='Train Accuracy', marker='o')
-    plt.plot(epochs, test_accuracies, label='Test Accuracy', marker='s')
-    plt.xlabel('Epoch')
-    plt.ylabel('Accuracy (%)')
-    plt.title('Accuracy over Epochs')
-    plt.legend()
-    plt.grid(True)
-
-    plt.tight_layout()
-    plot_path = os.path.join(plot_save_directory, "training_loss.png")
-    plt.savefig(plot_path)
-    print(f"Plot saved to {plot_path}")
 
 
 def q2():
