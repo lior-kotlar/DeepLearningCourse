@@ -10,7 +10,7 @@ import os
 NUM_DIGITS = 10
 BATCH_SIZE = 64
 NUM_EPOCHS = 15
-LEARNING_RATE = 0.001
+LEARNING_RATE = 0.0001
 ENCODER_1_LAYER = 16
 ENCODER_2_LAYER = 32
 ENCODER_3_LAYER = 64
@@ -132,23 +132,14 @@ class MLP_classifier(nn.Module):
     def forward(self, x):
         return self.ff(x)
 
-class q2_encoder_classifier(nn.Module):
-    def __init__(self, encoder_1_layer, encoder_2_layer, encoder_3_layer):
+class encoder_classifier(nn.Module):
+    def __init__(self, encoder_1_layer, encoder_2_layer, encoder_3_layer, pretrained_model_path = None):
         super().__init__()
+        self.pretrained = False
         self.encoder = Encoder(encoder_1_layer, encoder_2_layer, encoder_3_layer)
-        self.classifer = MLP_classifier(input_size=encoder_3_layer)
-
-    def forward(self, x):
-        encoded = self.encoder(x)
-        encoded = encoded.view(encoded.size(0), -1)
-        classified = self.classifer(encoded)
-        return classified
-
-
-class q3_encoder_classifier(nn.Module):
-    def __init__(self, encoder_1_layer, encoder_2_layer, encoder_3_layer, pretrained_encoder_path):
-        super().__init__()
-        self.encoder = Encoder(encoder_1_layer, encoder_2_layer, encoder_3_layer)
+        if pretrained_model_path:
+            self.encoder.load_state_dict(torch.load(pretrained_model_path))
+            self.pretrained = True
         self.classifer = MLP_classifier(input_size=encoder_3_layer)
 
     def forward(self, x):
@@ -227,7 +218,7 @@ def get_mnist_training_sets(batch_size):
     )
     return train_loader, test_loader
 
-def q1_encoder_decoder_training(plot_save_directory, model_type, save_encoder):
+def encoder_decoder_training(plot_save_directory, model_type, save_encoder_path=None):
 
     data_loader, _ = get_mnist_training_sets(BATCH_SIZE)
     model = model_type.to(device)
@@ -252,16 +243,17 @@ def q1_encoder_decoder_training(plot_save_directory, model_type, save_encoder):
         outputs.append((epoch, img, reconstruction))
 
     plot_losses_and_reconstruction(outputs, losses, plot_save_directory, NUM_EPOCHS)
-    if save_encoder:
-        torch.save(model.encoder.state_dict(), "models/encoder_pretrained.pth")
+    if save_encoder_path:
+        torch.save(model.encoder.state_dict(), save_encoder_path)
+        print(f'saved trained encoder model to {save_encoder_path}')
 
-def q1(small = True, large = True, save_encoder = False):
+def q1(small = True, large = True, save_encoder_path = None, directory_to_save_plots = './plots/q1'):
     if small:
-        small_ae_save_directory = './plots/small autoencoder'
-        q1_encoder_decoder_training(small_ae_save_directory, Conv_AE_small())
+        small_ae_save_directory = f'{directory_to_save_plots}/small autoencoder'
+        encoder_decoder_training(small_ae_save_directory, Conv_AE_small(), save_encoder_path=None)
     if large:
-        large_ae_save_directory = './plots/large autoencoder'
-        q1_encoder_decoder_training(large_ae_save_directory, Conv_AE_large(16, 32, 64), save_encoder)
+        large_ae_save_directory = f'{directory_to_save_plots}/large autoencoder'
+        encoder_decoder_training(large_ae_save_directory, Conv_AE_large(16, 32, 64), save_encoder_path=save_encoder_path)
 
 def plot_loss_and_accuracy(train_losses, test_losses,
                            train_accuracies, test_accuracies,
@@ -299,21 +291,24 @@ def plot_loss_and_accuracy(train_losses, test_losses,
     plt.savefig(plot_path)
     print(f"Plot saved to {plot_path}")
 
-
-def get_q2_training_tools(pretrained_model_path = None):
-    if pretrained_model_path is None:
-        model = q2_encoder_classifier(ENCODER_1_LAYER, ENCODER_2_LAYER, ENCODER_3_LAYER)
-    else:
-
+def get_training_tools_encoder_classifier(pretrained_model_path=None):
+    model = encoder_classifier(ENCODER_1_LAYER, ENCODER_2_LAYER, ENCODER_3_LAYER, pretrained_model_path)
     model.to(device)
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE, weight_decay=1e-5)
+
+    if model.pretrained:
+        for param in model.encoder.parameters():
+            param.requires_grad = False
+        optimizer = optim.Adam(model.classifer.parameters(), lr=LEARNING_RATE, weight_decay=1e-5)
+        print('Loaded pretrained encoder, and froze its weights')
+    else:
+        optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE, weight_decay=1e-5)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', patience=1, factor=0.1)
     train_loader, test_loader = get_mnist_training_sets(BATCH_SIZE)
     return model, criterion, optimizer, scheduler, train_loader, test_loader
 
-def q2_training(plot_save_directory, pretrained_encoder = False):
-    model, criterion, optimizer, scheduler, train_loader, test_loader = get_q2_training_tools()
+def encoder_classifier_training(plot_save_directory, pretrained_encoder_path = None):
+    model, criterion, optimizer, scheduler, train_loader, test_loader = get_training_tools_encoder_classifier(pretrained_model_path=pretrained_encoder_path)
     train_losses, test_losses = [], []
     train_accuracies, test_accuracies = [], []
     learning_rate_updates_epochs = []
@@ -373,14 +368,24 @@ def q2_training(plot_save_directory, pretrained_encoder = False):
                            plot_save_directory,
                            learning_rate_updates_epochs)
 
-
 def q2():
     small_ae_save_directory = './plots/q2 classifier'
-    q2_training(small_ae_save_directory)
+    encoder_classifier_training(small_ae_save_directory)
+
+
+def q3():
+    path_to_save_trained_encoder = "./models/encoder_pretrained.pth"
+    if not os.path.isfile(path_to_save_trained_encoder):
+        directory_to_save_encoder_decoder_plots ='./plots/q3'
+        q1(small = False, large=True,
+           save_encoder_path=path_to_save_trained_encoder,
+           directory_to_save_plots=directory_to_save_encoder_decoder_plots)
+    directory_to_save_plot = "./plots/q3/pretrained"
+    encoder_classifier_training(directory_to_save_plot, path_to_save_trained_encoder)
 
 
 def main():
-    q2()
+    q1()
 
 
 if __name__ == '__main__':
