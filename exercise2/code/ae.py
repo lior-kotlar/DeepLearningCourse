@@ -9,8 +9,9 @@ import os
 # size = ((input_size-kernel_size+2*padding)/stride) + 1
 NUM_DIGITS = 10
 BATCH_SIZE = 64
-NUM_EPOCHS = 15
-LEARNING_RATE = 0.0001
+NUM_EPOCHS = 20
+LEARNING_RATE = 0.001
+TRAIN_RATIO = 0.8
 ENCODER_1_LAYER = 16
 ENCODER_2_LAYER = 32
 ENCODER_3_LAYER = 64
@@ -132,7 +133,7 @@ class MLP_classifier(nn.Module):
     def forward(self, x):
         return self.ff(x)
 
-class encoder_classifier(nn.Module):
+class EncoderClassifier(nn.Module):
     def __init__(self, encoder_1_layer, encoder_2_layer, encoder_3_layer, pretrained_model_path = None):
         super().__init__()
         self.pretrained = False
@@ -186,11 +187,8 @@ def plot_losses_and_reconstruction(outputs, losses, plot_save_directory, num_epo
     plt.savefig(plot_path)
     print(f"Plot saved to {plot_path}")
 
-def get_mnist_training_sets(batch_size):
-    transform = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize((0.1307,), (0.3081,))
-    ])
+def get_mnist_training_sets():
+    transform = transforms.ToTensor()
     mnist_training_data = datasets.MNIST(
         './data',
         train=True,
@@ -198,7 +196,7 @@ def get_mnist_training_sets(batch_size):
         transform=transform
     )
 
-    mninst_test_data = datasets.MNIST(
+    mnist_test_data = datasets.MNIST(
         './data',
         train=False,
         download=True,
@@ -207,29 +205,30 @@ def get_mnist_training_sets(batch_size):
 
     train_loader = torch.utils.data.DataLoader(
         mnist_training_data,
-        batch_size=batch_size,
+        batch_size=BATCH_SIZE,
         shuffle=True
     )
 
     test_loader = torch.utils.data.DataLoader(
-        mninst_test_data,
-        batch_size=batch_size,
+        mnist_test_data,
+        batch_size=BATCH_SIZE,
         shuffle=False
     )
     return train_loader, test_loader
 
-def encoder_decoder_training(plot_save_directory, model_type, save_encoder_path=None):
-
-    data_loader, _ = get_mnist_training_sets(BATCH_SIZE)
-    model = model_type.to(device)
+def encoder_decoder_training(plot_save_directory, model, save_encoder_path=None):
+    train_loader, test_loader = get_mnist_training_sets()
+    model = model.to(device)
     criterion = nn.L1Loss()
-    optimizer = optim.Adam(model_type.parameters(), lr=1e-3, weight_decay=1e-5)
-
+    optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE, weight_decay=1e-5)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', patience=1, factor=0.1)
     outputs = []
-    losses = []
+    train_losses, test_losses = [], []
+    learning_rate_updates_epochs = []
+    prev_lr = LEARNING_RATE
     for epoch in range(NUM_EPOCHS):
         running_loss = 0.0
-        for img, _ in data_loader:
+        for img, _ in train_loader:
             img = img.to(device)
             reconstruction = model(img)
             loss = criterion(reconstruction, img)
@@ -237,12 +236,33 @@ def encoder_decoder_training(plot_save_directory, model_type, save_encoder_path=
             loss.backward()
             optimizer.step()
             running_loss += loss.item()
-        epoch_loss = running_loss / len(data_loader)
-        losses.append(epoch_loss)
+        epoch_loss = running_loss / len(train_loader)
+        train_losses.append(epoch_loss)
         print(f'Epoch: {epoch}, Loss: {loss.item():.4f}')
         outputs.append((epoch, img, reconstruction))
 
-    plot_losses_and_reconstruction(outputs, losses, plot_save_directory, NUM_EPOCHS)
+        model.eval()
+        test_running_loss = 0.0
+        with torch.no_grad():
+            for img, labels in test_loader:
+                img = img.to(device)
+                reconstruction = model(img)
+                loss = criterion(reconstruction, img)
+                test_running_loss += loss.item()
+        test_loss = test_running_loss / len(test_loader)
+        test_losses.append(test_loss)
+
+        scheduler.step(test_loss)
+        current_lr = optimizer.param_groups[0]['lr']
+        if current_lr != prev_lr:
+            print(f"Learning rate reduced from {prev_lr:.8f} to {current_lr:.8f}")
+            learning_rate_updates_epochs.append(epoch)
+            prev_lr = current_lr
+
+        print(f"Epoch {epoch + 1}/{NUM_EPOCHS} - Train Loss: {epoch_loss:.4f} | Test Loss: {test_loss:.4f}")
+
+    plot_losses_and_reconstruction(outputs, train_losses, plot_save_directory, NUM_EPOCHS)
+
     if save_encoder_path:
         torch.save(model.encoder.state_dict(), save_encoder_path)
         print(f'saved trained encoder model to {save_encoder_path}')
@@ -292,10 +312,9 @@ def plot_loss_and_accuracy(train_losses, test_losses,
     print(f"Plot saved to {plot_path}")
 
 def get_training_tools_encoder_classifier(pretrained_model_path=None):
-    model = encoder_classifier(ENCODER_1_LAYER, ENCODER_2_LAYER, ENCODER_3_LAYER, pretrained_model_path)
-    model.to(device)
+    model = EncoderClassifier(ENCODER_1_LAYER, ENCODER_2_LAYER, ENCODER_3_LAYER, pretrained_model_path)
     criterion = nn.CrossEntropyLoss()
-
+    model.to(device)
     if model.pretrained:
         for param in model.encoder.parameters():
             param.requires_grad = False
@@ -304,7 +323,7 @@ def get_training_tools_encoder_classifier(pretrained_model_path=None):
     else:
         optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE, weight_decay=1e-5)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', patience=1, factor=0.1)
-    train_loader, test_loader = get_mnist_training_sets(BATCH_SIZE)
+    train_loader, test_loader = get_mnist_training_sets()
     return model, criterion, optimizer, scheduler, train_loader, test_loader
 
 def encoder_classifier_training(plot_save_directory, pretrained_encoder_path = None):
@@ -372,7 +391,6 @@ def q2():
     small_ae_save_directory = './plots/q2 classifier'
     encoder_classifier_training(small_ae_save_directory)
 
-
 def q3():
     path_to_save_trained_encoder = "./models/encoder_pretrained.pth"
     if not os.path.isfile(path_to_save_trained_encoder):
@@ -380,12 +398,12 @@ def q3():
         q1(small = False, large=True,
            save_encoder_path=path_to_save_trained_encoder,
            directory_to_save_plots=directory_to_save_encoder_decoder_plots)
-    directory_to_save_plot = "./plots/q3/pretrained"
-    encoder_classifier_training(directory_to_save_plot, path_to_save_trained_encoder)
+    directory_to_save_classifier_plot = "./plots/q3/pretrained"
+    encoder_classifier_training(directory_to_save_classifier_plot, path_to_save_trained_encoder)
 
 
 def main():
-    q1()
+    q3()
 
 
 if __name__ == '__main__':
