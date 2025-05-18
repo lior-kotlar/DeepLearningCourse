@@ -27,8 +27,9 @@ LARGE = 1
 LARGE_LATENT_DIMENSION = 16
 SMALL_LATENT_DIMENSION = 4
 MNIST_IMAGE_SIZE = 28
-TRAINING_SUBSET_SIZE = 28
+TRAINING_SUBSET_SIZE = 100
 sizes_dict = {0:'small', 1:'large'}
+model_type_dict = {CLASSIFIER: 'classifier', DECODER: 'decoder'}
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class Linear_AE(nn.Module):
@@ -84,7 +85,6 @@ class Conv_AE_custom(nn.Module):
         encoded = self.encoder(x)
         decoded = self.decoder(encoded)
         return decoded
-
 
 class Conv_AE_small(nn.Module):
     def __init__(self):
@@ -215,7 +215,7 @@ def plot_losses_and_reconstruction(outputs, losses, plot_save_directory, num_epo
     plt.plot(range(num_epochs), losses, marker='o')
     plt.title('Training Loss Over Epochs')
     plt.xlabel('Epoch')
-    plt.ylabel('MSE Loss')
+    plt.ylabel('L1 Loss')
     plt.grid(True)
     plt.tight_layout()
     plot_path = os.path.join(plot_save_directory, "training_loss.png")
@@ -284,7 +284,7 @@ def plot_loss_and_accuracy(train_losses, test_losses,
             max_loss = max(train_losses + test_losses)
             plt.text(epoch_idx + 1, max_loss, 'LR ↓', color='red', fontsize=8, ha='center', va='bottom')
 
-    file_name = f'loss and accuracy partial dataset.png' if subset else 'loss and accuracy full dataset.png'
+    file_name = f'loss and accuracy {TRAINING_SUBSET_SIZE} examples.png' if subset else 'loss and accuracy full dataset.png'
 
     # Accuracy Plot
     plt.subplot(1, 2, 2)
@@ -380,7 +380,7 @@ def intra_class_distance(data_loader, encoder, plot_save_directory):
     with torch.no_grad():
         for imgs, labels in data_loader:
             imgs = imgs.to(device)
-            latents = encoder(imgs)  # Shape: [batch_size, latent_dim]
+            latents = encoder(imgs)
             all_latents.append(latents.cpu())
             all_labels.append(labels.cpu())
 
@@ -425,6 +425,21 @@ def intra_class_distance(data_loader, encoder, plot_save_directory):
     print(f"Saved: {save_path}")
 
 
+def compose_status_message(second_component_type, model_size, pretrained_encoder_path, train_data_subset):
+    status_message = (f'starting to train {sizes_dict[model_size]} '
+                      f'encoder to {model_type_dict[second_component_type]} model, ')
+    if pretrained_encoder_path:
+        status_message += f'with a pretrained encoder {pretrained_encoder_path}.'
+    else:
+        status_message += f'training both encoder and {model_type_dict[second_component_type]}.'
+
+    if train_data_subset:
+        status_message += f' using only {TRAINING_SUBSET_SIZE} examples.'
+    else:
+        status_message += f' using full training set.'
+    return status_message
+
+
 def encoder_to_decoder_training(plot_save_directory,
                                 latent_dimension,
                                 model_size, pretrained_encoder_path = None,
@@ -436,12 +451,10 @@ def encoder_to_decoder_training(plot_save_directory,
                                                                 model_size=model_size,
                                                                 pretrained_encoder_path=pretrained_encoder_path,
                                                                 train_data_subset=train_data_subset)
-    if pretrained_encoder_path:
-        print(f'starting to train {sizes_dict[model_size]} encoder to decoder model, '
-              f'with a pretrained encoder {pretrained_encoder_path}')
-    else:
-        print(f'starting to train {sizes_dict[model_size]} encoder to decoder model. '
-              f'training both encoder and decoder.')
+
+    status_message = compose_status_message(DECODER, model_size, pretrained_encoder_path, train_data_subset)
+    print(status_message)
+
     outputs = []
     train_losses, test_losses = [], []
     learning_rate_updates_epochs = []
@@ -480,6 +493,9 @@ def encoder_to_decoder_training(plot_save_directory,
 
         print(f"Epoch {epoch + 1}/{NUM_EPOCHS} - Train Loss: {epoch_loss:.4f} | Test Loss: {test_loss:.4f}")
 
+    plot_save_directory = plot_save_directory + ' d4' if latent_dimension == SMALL_LATENT_DIMENSION else (
+            plot_save_directory + ' d16')
+
     show_reconstructions_by_class(model, test_loader, plot_save_directory=plot_save_directory)
 
     intra_class_distance(test_loader, model.encoder, plot_save_directory=plot_save_directory)
@@ -498,10 +514,12 @@ def encoder_to_classifier_training(plot_save_directory,
     if pretrained_encoder_path and save_classifier_encoder_path:
         print('ERROR: choose whether to use pretrained reconstruction encoder or to save classifying encoder')
         exit(1)
-    if pretrained_encoder_path:
-        print(f'starting to train encoder to classifier model, with a pretrained encoder {pretrained_encoder_path}')
-    else:
-        print('starting to train encoder to classifier model. training both encoder and classifier.')
+    message = compose_status_message(CLASSIFIER, LARGE, pretrained_encoder_path, train_data_subset)
+    print(message)
+    # if pretrained_encoder_path:
+    #     print(f'starting to train encoder to classifier model, with a pretrained encoder {pretrained_encoder_path}')
+    # else:
+    #     print('starting to train encoder to classifier model. training both encoder and classifier.')
     (model, criterion, optimizer,
      scheduler, train_loader, test_loader) = get_training_tools(model_type=CLASSIFIER,
                                                                 model_size=LARGE,
@@ -568,7 +586,7 @@ def encoder_to_classifier_training(plot_save_directory,
                            learning_rate_updates_epochs,
                            subset=train_data_subset)
 
-    if save_classifier_encoder_path:
+    if save_classifier_encoder_path and not train_data_subset:
         torch.save(model.encoder.state_dict(), save_classifier_encoder_path)
         print(f'saved trained encoder model to {save_classifier_encoder_path}')
 
@@ -581,22 +599,34 @@ def classifier_to_reconstruction_training(plot_save_directory,
 
 
 def q1(small_model = True, large_model = True,
-       save_encoder_path = None,
+       save_encoder_path = None, both_d_sizes = True,
        directory_to_save_plots ='./plots/q1'):
     if small_model:
         small_ed_save_directory = f'{directory_to_save_plots}/small autoencoder'
-        encoder_to_decoder_training(plot_save_directory=small_ed_save_directory, model_size = SMALL,
+        if both_d_sizes:
+            encoder_to_decoder_training(plot_save_directory=small_ed_save_directory, model_size=SMALL,
+                                        latent_dimension=LARGE_LATENT_DIMENSION,
+                                        pretrained_encoder_path=None, save_encoder_path=save_encoder_path)
+
+        encoder_to_decoder_training(plot_save_directory=small_ed_save_directory, model_size=SMALL,
                                     latent_dimension=SMALL_LATENT_DIMENSION,
-                                    pretrained_encoder_path = None, save_encoder_path=save_encoder_path)
+                                    pretrained_encoder_path=None, save_encoder_path=save_encoder_path)
+
     if large_model:
         large_ed_save_directory = f'{directory_to_save_plots}/large autoencoder'
 
-        encoder_to_decoder_training(plot_save_directory=large_ed_save_directory, model_size = LARGE,
-                                    latent_dimension=LARGE_LATENT_DIMENSION,
+        if both_d_sizes:
+            encoder_to_decoder_training(plot_save_directory=large_ed_save_directory, model_size = LARGE,
+                                    latent_dimension=SMALL_LATENT_DIMENSION,
                                     pretrained_encoder_path = None, save_encoder_path=save_encoder_path)
 
+        encoder_to_decoder_training(plot_save_directory=large_ed_save_directory, model_size=LARGE,
+                                    latent_dimension=LARGE_LATENT_DIMENSION,
+                                    pretrained_encoder_path=None, save_encoder_path=save_encoder_path)
+
+
 def q2(encoder_classifier_plot_save_directory = './plots/q2',
-       save_classifier_encoder_path = None):
+       save_classifier_encoder_path = './saved models/classifier_encoder_pretrained.pth'):
 
     encoder_to_classifier_training(encoder_classifier_plot_save_directory,
                                    pretrained_encoder_path= None,
@@ -612,7 +642,7 @@ def q3():
     path_to_save_trained_reconstruction_encoder = "./saved models/reconstruction_encoder_pretrained.pth"
     if not os.path.isfile(path_to_save_trained_reconstruction_encoder):
         directory_to_save_encoder_decoder_plots ='./plots/q3'
-        q1(small_model= False, large_model=True,
+        q1(small_model= False, large_model=True, both_d_sizes=False,
            save_encoder_path=path_to_save_trained_reconstruction_encoder,
            directory_to_save_plots=directory_to_save_encoder_decoder_plots)
     directory_to_save_classifier_plot = "./plots/q3/pretrained"
@@ -635,7 +665,7 @@ def q4():
 
 
 def main():
-    q1()
+    q4()
 
 
 if __name__ == '__main__':
