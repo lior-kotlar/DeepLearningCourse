@@ -231,7 +231,6 @@ def get_mnist_training_sets(train_subset = False):
         transform=transform
     )
 
-
     mnist_test_data = datasets.MNIST(
         './data',
         train=False,
@@ -649,6 +648,10 @@ def q3():
     encoder_to_classifier_training(plot_save_directory=directory_to_save_classifier_plot,
                                    pretrained_encoder_path = path_to_save_trained_reconstruction_encoder,
                                    save_classifier_encoder_path = None)
+    encoder_to_classifier_training(plot_save_directory=directory_to_save_classifier_plot,
+                                   pretrained_encoder_path=path_to_save_trained_reconstruction_encoder,
+                                   save_classifier_encoder_path=None,
+                                   train_data_subset=True)
 
 def q4():
     path_to_save_trained_classifier_encoder = "./saved models/classifier_encoder_pretrained.pth"
@@ -665,6 +668,9 @@ def q4():
 
 
 def main():
+    q1()
+    q2()
+    q3()
     q4()
 
 
