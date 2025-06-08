@@ -1,5 +1,5 @@
 import torch
-from torchtext.legacy.data import Field
+
 import torchtext as tx
 from torchtext.vocab import GloVe
 from torchtext.datasets import IMDB
@@ -33,7 +33,7 @@ def tokinize(s):
 
 
 def load_data_set(load_my_reviews=False):
-    data=pd.read_csv("IMDB Dataset.csv")
+    data=pd.read_csv("exercise3/data/IMDB Dataset.csv")
     train_data=data[:Train_size]
     train_iter=ReviewDataset(train_data["review"],train_data["sentiment"])
     test_data=data[Train_size:]
