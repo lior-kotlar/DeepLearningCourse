@@ -91,32 +91,28 @@ class ExGRU(nn.Module):
         self.output_size = output_size
 
         self.reset_gate = nn.Linear(self.input_size+self.hidden_size, self.hidden_size)
-
         self.update_gate = nn.Linear(self.input_size+self.hidden_size, self.hidden_size)
-        # GRU Cell weights
-        # self.something =
-        # etc ...
+        self.fc = nn.Linear(input_size + hidden_size, hidden_size)
+        self.output_mlp = nn.Linear(hidden_size, output_size)
+
+        self.sigmoid = nn.Sigmoid()
+        self.tanh = nn.Tanh()
 
     def name(self):
         return "GRU"
 
     def forward(self, x, hidden_state):
-        output, hidden = None, None
+        x = x.to(hidden_state.device)
         # Implementation of GRU cell
-
         # missing implementation
-        print(f'x shape: {x.shape}, hidden shape: {hidden_state.shape}')
-        concatenated = torch.cat((hidden_state, x), dim=1)
-        print(f'concatenated shape: {concatenated.shape}')
-
-        after_linear = self.reset_gate_weights(concatenated)
-        print(f'after_linear shape: {after_linear.shape}')
-        r_t = nn.Sigmoid(after_linear)
-        z_t = nn.Sigmoid(self.update_gate_weights(concatenated))
-
-        print(f'r_t shape: {r_t.shape}, z_t shape: {z_t.shape}')
-        # u = torch.matmul()
-
+        concatenated = torch.cat([hidden_state, x], dim=1)
+        z_t = self.sigmoid(self.update_gate(concatenated))
+        r_t = self.sigmoid(self.reset_gate(concatenated))
+        mid = hidden_state * r_t
+        cat_mid = torch.cat([mid, x], dim=1)
+        h_hat = self.tanh(self.fc(cat_mid))
+        hidden = ((1 - z_t) * hidden_state) + (z_t * h_hat)
+        output = self.output_mlp(hidden)
         return output, hidden
 
     def init_hidden(self, bs):
@@ -245,6 +241,8 @@ def save_train_test_loss_plot(train_losses, test_losses, test_steps,
 
 def train():
     model = select_model()
+    model.to(device)
+
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
@@ -262,6 +260,9 @@ def train():
 
         for labels, reviews, reviews_text in train_dataset:   # getting training batches
 
+            labels = labels.to(device)
+            reviews = reviews.to(device)
+
             itr = itr + 1
 
             if (itr + 1) % test_interval == 0:
@@ -273,7 +274,7 @@ def train():
             # Recurrent nets (RNN/GRU)
 
             if run_recurrent:
-                hidden_state = model.init_hidden(int(labels.shape[0]))
+                hidden_state = model.init_hidden(int(labels.shape[0])).to(device)
 
                 for i in range(num_words):
                     output, hidden_state = model(reviews[:,i,:], hidden_state)  # HIDE
