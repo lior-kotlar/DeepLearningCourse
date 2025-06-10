@@ -19,7 +19,7 @@ OUTPUT_SIZE = 2
 HIDDEN_SIZE = 128        # to experiment with
 
 run_recurrent = True    # else run Token-wise MLP
-use_RNN = True          # otherwise GRU
+use_RNN = False         # otherwise GRU
 atten_size = 0          # atten > 0 means using restricted self atten
 
 reload_model = False
@@ -70,6 +70,7 @@ class ExRNN(nn.Module):
 
     def forward(self, x, hidden_state):
 
+        # print(f'input shape is {x.shape}')
         concatenated = torch.cat((x, hidden_state), dim=1)
         hidden = self.tanh(self.in2hidden(concatenated))
         output = self.hidden2out(hidden)
@@ -81,35 +82,17 @@ class ExRNN(nn.Module):
         return torch.zeros(bs, self.hidden_size)
 
 
-class PY_RNN(nn.Module):
-    def __init__(self, input_size, num_layers, hidden_size, sequence_length, num_classes):
-        super(PY_RNN, self).__init__()
-        self.num_layers = num_layers
-        self.hidden_size = hidden_size
-
-        self.rnn = nn.RNN(input_size, hidden_size, num_layers, batch_first=True)
-        self.fc1 = nn.Linear(hidden_size * sequence_length, num_classes)
-
-    def forward(self, x):
-        h0 = torch.zeros(self.num_layers, x.size(0), self.hidden_size).to(device)
-
-        out, _ = self.rnn(x, h0)
-        #         print(out.shape)
-        out = out.reshape(out.shape[0], -1)
-        out = self.fc1(out)
-        return out
-
-    def name(self):
-        return "PYRNN"
-
-    def init_hidden(self, bs):
-        return torch.zeros(bs, self.hidden_size)
-
 # Implements GRU Unit
 class ExGRU(nn.Module):
     def __init__(self, input_size, output_size, hidden_size):
         super(ExGRU, self).__init__()
+        self.input_size = input_size
         self.hidden_size = hidden_size
+        self.output_size = output_size
+
+        self.reset_gate = nn.Linear(self.input_size+self.hidden_size, self.hidden_size)
+
+        self.update_gate = nn.Linear(self.input_size+self.hidden_size, self.hidden_size)
         # GRU Cell weights
         # self.something =
         # etc ...
@@ -118,12 +101,23 @@ class ExGRU(nn.Module):
         return "GRU"
 
     def forward(self, x, hidden_state):
-        pass
+        output, hidden = None, None
         # Implementation of GRU cell
 
         # missing implementation
+        print(f'x shape: {x.shape}, hidden shape: {hidden_state.shape}')
+        concatenated = torch.cat((hidden_state, x), dim=1)
+        print(f'concatenated shape: {concatenated.shape}')
 
-        # return output, hidden
+        after_linear = self.reset_gate_weights(concatenated)
+        print(f'after_linear shape: {after_linear.shape}')
+        r_t = nn.Sigmoid(after_linear)
+        z_t = nn.Sigmoid(self.update_gate_weights(concatenated))
+
+        print(f'r_t shape: {r_t.shape}, z_t shape: {z_t.shape}')
+        # u = torch.matmul()
+
+        return output, hidden
 
     def init_hidden(self, bs):
         return torch.zeros(bs, self.hidden_size)
@@ -218,7 +212,6 @@ def select_model():
     if run_recurrent:
         if use_RNN:
             model = ExRNN(input_size, OUTPUT_SIZE, HIDDEN_SIZE)
-            model = PY_RNN(input_size, 2, HIDDEN_SIZE, sequence_length=100, num_classes=2)
         else:
             model = ExGRU(input_size, OUTPUT_SIZE, HIDDEN_SIZE)
     else:

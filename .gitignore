@@ -135,7 +135,8 @@ venv/
 ENV/
 env.bak/
 venv.bak/
-enviro/
+exercise3/ex3env/
+.vector_cache/
 
 # Spyder project settings
 .spyderproject
