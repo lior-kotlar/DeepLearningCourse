@@ -36,43 +36,47 @@ def load_data_set(load_my_reviews=False):
     data=pd.read_csv("exercise3/data/IMDB Dataset.csv")
     train_data=data[:Train_size]
     train_iter=ReviewDataset(train_data["review"],train_data["sentiment"])
+    print(f'train iter: {train_iter[0]}')
+    print(f'train iter: {train_iter[1]}')
+    print(f'train iter: {train_iter[2]}')
     test_data=data[Train_size:]
     if load_my_reviews:
         my_data = pd.DataFrame({"review": my_test_texts, "sentiment": my_test_labels})
-        test_data=test_data.append(my_data)
+        pd.concat([test_data,my_data])
+        # test_data=test_data.append(my_data)
     test_data=test_data.reset_index(drop=True)
     test_iter=ReviewDataset(test_data["review"],test_data["sentiment"])
     return train_iter, test_iter
 
 
-embadding = GloVe(name='6B', dim=embedding_size)
+embedding = GloVe(name='6B', dim=embedding_size)
 tokenizer = get_tokenizer(tokenizer=tokinize)
 
 
 def preprocess_review(s):
     cleaned = tokinize(s)
-    embadded = embadding.get_vecs_by_tokens(cleaned)
-    if embadded.shape[0] != 100 or embadded.shape[1] != 100:
-        embadded = torch.nn.functional.pad(embadded, (0, 0, 0, MAX_LENGTH - embadded.shape[0]))
-    return torch.unsqueeze(embadded, 0)
+    embedded = embedding.get_vecs_by_tokens(cleaned)
+    if embedded.shape[0] != 100 or embedded.shape[1] != 100:
+        embedded = torch.nn.functional.pad(embedded, (0, 0, 0, MAX_LENGTH - embedded.shape[0]))
+    return torch.unsqueeze(embedded, 0)
 
 
 def preprocess_label(label):
     return [0.0, 1.0] if label == "negative" else [1.0, 0.0]
 
 
-def collact_batch(batch):
+def collect_batch(batch):
     label_list = []
     review_list = []
-    embadding_list=[]
+    embedding_list=[]
     for  review,label in batch:
         label_list.append(preprocess_label(label))### label
         review_list.append(tokinize(review))### the  actuall review
         processed_review = preprocess_review(review).detach()
-        embadding_list.append(processed_review) ### the embedding vectors
+        embedding_list.append(processed_review) ### the embedding vectors
     label_list = torch.tensor(label_list, dtype=torch.float32).reshape((-1, 2))
-    embadding_tensor= torch.cat(embadding_list)
-    return label_list.to(device), embadding_tensor.to(device) ,review_list
+    embedding_tensor= torch.cat(embedding_list)
+    return label_list.to(device), embedding_tensor.to(device) ,review_list
 
 
 ##########################
@@ -108,9 +112,9 @@ class ReviewDataset(torch.utils.data.Dataset):
 def get_data_set(batch_size, toy=False):
         train_data, test_data = load_data_set(load_my_reviews=toy)
         train_dataloader = DataLoader(train_data, batch_size=batch_size,
-                                      shuffle=True, collate_fn=collact_batch)
+                                      shuffle=True, collate_fn=collect_batch)
         test_dataloader = DataLoader(test_data, batch_size=batch_size,
-                                     shuffle=True, collate_fn=collact_batch)
+                                     shuffle=True, collate_fn=collect_batch)
         return train_dataloader, test_dataloader, MAX_LENGTH, embedding_size
 
 

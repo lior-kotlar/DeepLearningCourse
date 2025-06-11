@@ -12,11 +12,15 @@ import torch.nn as nn
 import numpy as np
 import loader as ld
 import matplotlib.pyplot as plt
+import os
 
 
 BATCH_SIZE = 64
 OUTPUT_SIZE = 2
-HIDDEN_SIZE = 128        # to experiment with
+HIDDEN_SIZE_LARGE = 128        # to experiment with
+HIDDEN_SIZE_SMALL = 64
+MODEL_SAVE_DIRECTORY = 'exercise3/models'
+PLOT_SAVE_DIRECTORY = 'exercise3/plots'
 
 run_recurrent = True    # else run Token-wise MLP
 use_RNN = False         # otherwise GRU
@@ -28,7 +32,7 @@ learning_rate = 0.001
 test_interval = 50
 
 # Loading sataset, use toy = True for obtaining a smaller dataset
-train_dataset, test_dataset, num_words, input_size = ld.get_data_set(BATCH_SIZE)
+train_dataset, test_dataset, num_words, input_size = ld.get_data_set(BATCH_SIZE, toy=True)
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 # Special matrix multipication layer (like torch.Linear but can operate on arbitrary sized
@@ -48,8 +52,6 @@ class MatMul(nn.Module):
         if self.use_bias:
             x = x+ self.bias 
         return x
-        
-# Implements RNN Unit
 
 class ExRNN(nn.Module):
     def __init__(self, input_size, output_size, hidden_size):
@@ -81,8 +83,6 @@ class ExRNN(nn.Module):
     def init_hidden(self, bs):
         return torch.zeros(bs, self.hidden_size)
 
-
-# Implements GRU Unit
 class ExGRU(nn.Module):
     def __init__(self, input_size, output_size, hidden_size):
         super(ExGRU, self).__init__()
@@ -93,7 +93,7 @@ class ExGRU(nn.Module):
         self.reset_gate = nn.Linear(self.input_size+self.hidden_size, self.hidden_size)
         self.update_gate = nn.Linear(self.input_size+self.hidden_size, self.hidden_size)
         self.fc = nn.Linear(input_size + hidden_size, hidden_size)
-        self.output_mlp = nn.Linear(hidden_size, output_size)
+        self.output_fc = nn.Linear(hidden_size, output_size)
 
         self.sigmoid = nn.Sigmoid()
         self.tanh = nn.Tanh()
@@ -108,16 +108,16 @@ class ExGRU(nn.Module):
         concatenated = torch.cat([hidden_state, x], dim=1)
         z_t = self.sigmoid(self.update_gate(concatenated))
         r_t = self.sigmoid(self.reset_gate(concatenated))
-        mid = hidden_state * r_t
-        cat_mid = torch.cat([mid, x], dim=1)
-        h_hat = self.tanh(self.fc(cat_mid))
-        hidden = ((1 - z_t) * hidden_state) + (z_t * h_hat)
-        output = self.output_mlp(hidden)
+        u = hidden_state * r_t
+        cat_mid = torch.cat([u, x], dim=1)
+        h_t_tag = self.tanh(self.fc(cat_mid))
+        # hidden = ((1 - z_t) * hidden_state) + (z_t * h_t_tag)
+        hidden = (z_t * hidden_state) + ((1 - z_t) * h_t_tag)
+        output = self.output_fc(hidden)
         return output, hidden
 
     def init_hidden(self, bs):
         return torch.zeros(bs, self.hidden_size)
-
 
 class ExMLP(nn.Module):
     def __init__(self, input_size, output_size, hidden_size):
@@ -142,7 +142,6 @@ class ExMLP(nn.Module):
         # rest
 
         return x
-
 
 class ExLRestSelfAtten(nn.Module):
     def __init__(self, input_size, output_size, hidden_size):
@@ -199,24 +198,22 @@ class ExLRestSelfAtten(nn.Module):
 # prints also the final scores, the softmaxed prediction values and the true label values
 
 def print_review(rev_text, sbs1, sbs2, lbl1, lbl2):
-
     # implement
     pass
 
-# select model to use
-def select_model():
+def select_model(hidden_dimension=HIDDEN_SIZE_LARGE):
     if run_recurrent:
         if use_RNN:
-            model = ExRNN(input_size, OUTPUT_SIZE, HIDDEN_SIZE)
+            model = ExRNN(input_size, OUTPUT_SIZE, hidden_dimension)
         else:
-            model = ExGRU(input_size, OUTPUT_SIZE, HIDDEN_SIZE)
+            model = ExGRU(input_size, OUTPUT_SIZE, hidden_dimension)
     else:
         if atten_size > 0:
-            model = ExLRestSelfAtten(input_size, OUTPUT_SIZE, HIDDEN_SIZE)
+            model = ExLRestSelfAtten(input_size, OUTPUT_SIZE, hidden_dimension)
         else:
-            model = ExMLP(input_size, OUTPUT_SIZE, HIDDEN_SIZE)
+            model = ExMLP(input_size, OUTPUT_SIZE, hidden_dimension)
 
-    print("Using model: " + model.name())
+    print(f'Using model: {model.name()}, with hidden size: {hidden_dimension}')
 
     if reload_model:
         print("Reloading model")
@@ -224,23 +221,67 @@ def select_model():
 
     return model
 
+def save_accuracy_plot(test_steps, train_accuracies, test_accuracies,
+               model_name, hidden_dimension, save_directory_path):
+    title = f'Training and Test Accuracies - {model_name} - {hidden_dimension}'
+    filename = f'accuracy_plot_{model_name}_{hidden_dimension}.jpeg'
+    plot_save_path = os.path.join(save_directory_path, filename)
+
+    plt.subplot(1, 2, 2)
+    plt.plot(train_accuracies, label='Train Accuracy')
+    plt.plot([int(s * len(train_accuracies) / num_epochs) for s in test_steps],
+             test_accuracies, label='Test Accuracy')
+    plt.title(title)
+    plt.xlabel('Iteration')
+    plt.ylabel('Accuracy')
+    plt.legend()
+
+    plt.suptitle(f'Model: {model_name}')
+    plt.tight_layout()
+    plt.savefig(plot_save_path)
+    plt.close()
 
 def save_train_test_loss_plot(train_losses, test_losses, test_steps,
-                              title="Training and Test Loss Over Time",
-                              filename='exercise3/plots and outputs/loss_plot.jpeg'):
+                              model_name, hidden_dimension, save_directory_path):
+    title = f'Training and Test Loss - {model_name} - {hidden_dimension}'
+    filename = f'loss_plot_{model_name}_{hidden_dimension}.jpeg'
+    plot_save_path = os.path.join(save_directory_path, filename)
     plt.figure(figsize=(10, 5))
     plt.plot(train_losses, label="Train Loss", alpha=0.6)
     plt.plot(test_steps, test_losses, label="Test Loss", marker='o', linestyle='--')
     plt.xlabel("Training Iteration")
     plt.ylabel("Loss")
-    plt.title("Training and Test Loss Over Time")
+    plt.title(title)
     plt.legend()
     plt.grid(True)
     plt.tight_layout()
-    plt.savefig(filename, bbox_inches='tight')
+    plt.savefig(plot_save_path, bbox_inches='tight')
 
-def train():
-    model = select_model()
+def save_plots(train_losses, test_losses, test_steps,
+               train_accuracies, test_accuracies,
+               model_name, hidden_dimension):
+    folder_name = f'{model_name}_{hidden_dimension}'
+    save_directory_path = os.path.join(PLOT_SAVE_DIRECTORY, folder_name)
+    if not os.path.exists(save_directory_path):
+        os.makedirs(save_directory_path)
+
+    save_train_test_loss_plot(train_losses, test_losses, test_steps,
+               model_name, hidden_dimension, save_directory_path)
+
+    save_accuracy_plot(test_steps, train_accuracies, test_accuracies,
+               model_name, hidden_dimension, save_directory_path)
+
+
+
+def compute_accuracy(outputs, labels):
+    _, predicted = torch.max(outputs, 1)
+    _, true_labels = torch.max(labels, 1)
+    correct = (predicted == true_labels).sum().item()
+    total = labels.size(0)
+    return correct / total
+
+def train(hidden_dimension=HIDDEN_SIZE_LARGE):
+    model = select_model(hidden_dimension)
     model.to(device)
 
     criterion = nn.CrossEntropyLoss()
@@ -253,6 +294,9 @@ def train():
     test_loss_history = []
     test_steps = []
     # training steps in which a test step is executed every test_interval
+
+    train_accuracy_history = []
+    test_accuracy_history = []
 
     for epoch in range(num_epochs):
 
@@ -294,7 +338,7 @@ def train():
             # cross-entropy loss
 
             loss = criterion(output, labels)
-
+            accuracy = compute_accuracy(output, labels)
             # optimize in training iterations
 
             if not test_iter:
@@ -306,10 +350,12 @@ def train():
             if test_iter:
                 test_loss = 0.8 * float(loss.detach()) + 0.2 * test_loss
                 test_loss_history.append(test_loss)
+                test_accuracy_history.append(accuracy)
                 test_steps.append(epoch + itr / len(train_dataset))  # fractional epoch
             else:
                 train_loss = 0.9 * float(loss.detach()) + 0.1 * train_loss
                 train_loss_history.append(train_loss)
+                train_accuracy_history.append(accuracy)
 
             if test_iter:
                 print(
@@ -325,11 +371,22 @@ def train():
                     print_review(reviews_text[0], nump_subs[0,:,0], nump_subs[0,:,1], labels[0,0], labels[0,1])
 
                 # saving the model
-                torch.save(model, model.name() + ".pth")
+                model_save_path = os.path.join(MODEL_SAVE_DIRECTORY, f'{model.name()}_{hidden_dimension}.pth')
+                torch.save(model, model_save_path)
 
-    save_train_test_loss_plot(train_loss_history, test_loss_history, test_steps)
+    save_plots(train_loss_history, test_loss_history, test_steps,
+               train_accuracy_history, test_accuracy_history,
+               model.name(), hidden_dimension)
+
+def experiment_with_custom_review():
+    pass
+
+def q1():
+    train(hidden_dimension=HIDDEN_SIZE_LARGE)
+    train(hidden_dimension=HIDDEN_SIZE_SMALL)
+
 def main():
-    train()
+    q1()
 
 if __name__ == "__main__":
     main()
