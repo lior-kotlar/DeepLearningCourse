@@ -81,10 +81,12 @@ def collate_batch(batch):
 ##########################
 
 my_test_texts = []
-my_test_texts.append("this movie is very very bad ,the worst movie")
-my_test_texts.append("this movie is so great")
-my_test_texts.append("I really liked the fish and animations the anther casting was not so good")
-my_test_texts.append("i am happy that we left halfway through the movie. i recommend everyone to do the same")
+my_test_texts.append("A very bad movie ,the worst movie I have ever seen") #true negative
+my_test_texts.append("I really liked the animations, and the acting was excellent") #true positive
+my_test_texts.append("I expected it to be terrible but I was dead wrong."
+                     "I will definitely watch it again.") #false negative
+my_test_texts.append("I am happy that we left halfway through the movie."
+                     "I recommend everyone to do the same") #false positive
 my_test_labels = ["negative", "positive", "positive", "negative"]
 
 ##########################
